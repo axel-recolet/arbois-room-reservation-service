@@ -1,45 +1,51 @@
 import * as bcrypt from 'bcrypt';
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { User } from './user.entity';
+import { UserDocument } from './user.entity';
 import { CreateUserDto } from './dto';
-import { instanceToPlain } from 'class-transformer';
-import { UserAuthDto } from './dto/user-auth.dto';
 import { ConfigService } from '@nestjs/config';
+import { User } from './user';
 
 @Injectable()
 export class UsersRepository {
   constructor(
-    @InjectModel(User.name) private readonly userModel: Model<User>,
+    @InjectModel('User') private readonly userModel: Model<UserDocument>,
     private readonly configService: ConfigService,
   ) {}
 
-  async create(createCatDto: CreateUserDto): Promise<User> {
+  async create(createUserDto: CreateUserDto): Promise<User> {
     try {
-      const createdUser = await this.userModel.create(createCatDto);
+      createUserDto.password = await bcrypt.hash(createUserDto.password, 10);
+      const createdUser = await this.userModel.create(createUserDto);
       return createdUser.toObject();
     } catch (error) {
+      if (error.code === 11000 && error.keyPattern?.email === 1) {
+        throw new BadRequestException('This email already exits.');
+      }
       throw error;
     }
   }
 
-  async authentication({
-    email,
-    password,
-  }: UserAuthDto): Promise<User | undefined> {
-    const user = await this.userModel.findOne({ email });
-    if (!(await bcrypt.compare(password, user.password))) return;
+  async authentication(
+    email: string,
+    password: string,
+  ): Promise<User | undefined> {
+    const userEntity = await this.userModel.findOne({ email });
+    if (!userEntity) return;
 
-    return user.toObject();
+    const isCorrectPwd = await bcrypt.compare(password, userEntity.password);
+    if (!isCorrectPwd) return;
+
+    return userEntity.toObject();
   }
 
-  async findOneByEmail(email: string): Promise<User> {
+  async findOneByEmail(email: string): Promise<User | undefined> {
     try {
       const user = await this.userModel.findOne({
         email,
       });
-      return user.toObject();
+      return user?.toObject();
     } catch (error) {
       throw error;
     }
